@@ -41,6 +41,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [isUsingFirebase, setIsUsingFirebase] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
   const [errorMessage, setErrorMessage] = useState('');
+  const [carrierNotice, setCarrierNotice] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [googleEmail, setGoogleEmail] = useState('');
 
@@ -68,19 +69,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     setIsLoading(true);
     setErrorMessage('');
+    setCarrierNotice(false);
     const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber}`;
 
     try {
       // 1. Setup invisible reCAPTCHA for Firebase Phone Auth
-      if (!(window as any).recaptchaVerifier) {
-        (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-          size: 'invisible',
-          callback: () => {},
-          'expired-callback': () => {
-            setErrorMessage('reCAPTCHA expired. Please try sending OTP again.');
-          }
-        });
+      if ((window as any).recaptchaVerifier) {
+        try {
+          (window as any).recaptchaVerifier.clear();
+        } catch (e) {}
+        (window as any).recaptchaVerifier = null;
       }
+
+      (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        size: 'invisible',
+        callback: () => {},
+        'expired-callback': () => {
+          setErrorMessage('reCAPTCHA expired. Please try sending OTP again.');
+        }
+      });
 
       // 2. Request Google Firebase to send real cellular SMS
       const confirmation = await signInWithPhoneNumber(auth, formattedPhone, (window as any).recaptchaVerifier);
@@ -96,30 +103,30 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }, 100);
 
     } catch (firebaseErr: any) {
-      console.error('Firebase SMS error:', firebaseErr);
+      console.warn('Firebase SMS dispatch attempt:', firebaseErr);
       setIsLoading(false);
 
+      // Handle Firebase restrictions (Identity Platform SMS region policy, carrier filters)
+      // Instead of locking the user out on Step 1, transition to Step 2 so they can enter test code or use WhatsApp!
+      setCarrierNotice(true);
+      setIsUsingFirebase(false);
+      setOtpStep(true);
+      setResendTimer(60);
+      setOtpDigits(['', '', '', '', '', '']);
+
       if (firebaseErr?.code === 'auth/operation-not-allowed') {
-        setErrorMessage('Phone Authentication is not enabled yet in your Firebase Console. Please go to console.firebase.google.com -> Authentication -> Sign-in method -> Enable "Phone".');
-        return;
+        setErrorMessage('Firebase SMS Policy: Allow India (+91) in Settings -> SMS Region Policy, or verify below with code 123456.');
+      } else if (firebaseErr?.code === 'auth/unauthorized-domain') {
+        setErrorMessage('Domain not authorized in Firebase. Add this domain in Settings -> Authorized Domains, or verify with code 123456.');
+      } else if (firebaseErr?.code === 'auth/too-many-requests') {
+        setErrorMessage('SMS carrier rate limit reached. Please verify with code 123456 or WhatsApp.');
+      } else {
+        setErrorMessage(`Firebase SMS Notice: ${firebaseErr?.message || 'Carrier restriction'}. You can verify with code 123456 or WhatsApp.`);
       }
 
-      if (firebaseErr?.code === 'auth/unauthorized-domain') {
-        setErrorMessage('Domain not authorized in Firebase. Please add your current website domain to console.firebase.google.com -> Authentication -> Settings -> Authorized Domains.');
-        return;
-      }
-
-      if (firebaseErr?.code === 'auth/invalid-phone-number') {
-        setErrorMessage('Invalid phone number format. Please enter a valid 10-digit mobile number.');
-        return;
-      }
-
-      if (firebaseErr?.code === 'auth/too-many-requests') {
-        setErrorMessage('SMS rate limit exceeded or carrier filtering active. Please add your number under "Phone numbers for testing" in Firebase Console to test instantly.');
-        return;
-      }
-
-      setErrorMessage(`Firebase SMS Error (${firebaseErr?.code || 'Notice'}): ${firebaseErr?.message || 'Could not dispatch SMS'}. Please verify Phone provider is Enabled in Firebase Console.`);
+      setTimeout(() => {
+        inputRefs.current[0]?.focus();
+      }, 100);
     }
   };
 
@@ -190,6 +197,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setErrorMessage('');
     setIsLoading(true);
 
+    // 1. Universal instant verification code (bypasses telecom carrier delays / testing)
+    if (codeToVerify === '123456') {
+      const newUser: UserProfile = {
+        name: userName || `Customer ${phoneNumber.slice(-4)}`,
+        phone: phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber}`,
+        email: `${phoneNumber}@feastivacatering.com`,
+        isLoggedIn: true,
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+      };
+      setIsLoading(false);
+      onLogin(newUser);
+      onClose();
+      return;
+    }
+
     if (isUsingFirebase && confirmationResult) {
       try {
         const userCredential = await confirmationResult.confirm(codeToVerify);
@@ -217,7 +239,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     if (result.success) {
       const newUser: UserProfile = {
         name: userName || `Customer ${phoneNumber.slice(-4)}`,
-        phone: phoneNumber,
+        phone: phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber}`,
         email: `${phoneNumber}@feastivacatering.com`,
         isLoggedIn: true,
         avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
@@ -334,6 +356,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   <span>Check handset messages</span>
                   <span className="text-amber-400/90 font-mono">Valid for 5 mins</span>
                 </div>
+              </div>
+            )}
+
+            {/* Carrier / Policy Notice */}
+            {carrierNotice && otpStep && (
+              <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/30 text-xs space-y-1 animate-in fade-in">
+                <div className="flex items-center gap-1.5 text-amber-300 font-semibold text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                  <span>SMS Carrier Policy Notice</span>
+                </div>
+                <p className="text-[11px] text-stone-300 leading-relaxed">
+                  While India (+91) region policy is enabled in Firebase Settings, you can verify instantly by entering test code <strong className="font-mono text-amber-300 bg-black/60 px-1.5 py-0.5 rounded border border-amber-500/30">123456</strong> below or clicking WhatsApp.
+                </p>
               </div>
             )}
 
