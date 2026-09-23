@@ -96,27 +96,30 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }, 100);
 
     } catch (firebaseErr: any) {
-      console.warn('Firebase SMS notice:', firebaseErr);
-      
-      // If Phone Auth is not yet enabled in Firebase Console, guide the user cleanly:
+      console.error('Firebase SMS error:', firebaseErr);
+      setIsLoading(false);
+
       if (firebaseErr?.code === 'auth/operation-not-allowed') {
-        setErrorMessage('Phone Authentication is not yet enabled in your Firebase Console. Please go to console.firebase.google.com -> Authentication -> Sign-in method -> Enable "Phone".');
-        setIsLoading(false);
+        setErrorMessage('Phone Authentication is not enabled yet in your Firebase Console. Please go to console.firebase.google.com -> Authentication -> Sign-in method -> Enable "Phone".');
         return;
       }
 
-      // Fallback to secure session OTP if reCAPTCHA or domain isn't authorized locally
-      const { code } = otpService.generateOtp(phoneNumber);
-      await otpService.sendOtpRealTime(phoneNumber, code);
-      setIsUsingFirebase(false);
-      setOtpStep(true);
-      setResendTimer(60);
-      setOtpDigits(['', '', '', '', '', '']);
-      setIsLoading(false);
+      if (firebaseErr?.code === 'auth/unauthorized-domain') {
+        setErrorMessage('Domain not authorized in Firebase. Please add your current website domain to console.firebase.google.com -> Authentication -> Settings -> Authorized Domains.');
+        return;
+      }
 
-      setTimeout(() => {
-        inputRefs.current[0]?.focus();
-      }, 100);
+      if (firebaseErr?.code === 'auth/invalid-phone-number') {
+        setErrorMessage('Invalid phone number format. Please enter a valid 10-digit mobile number.');
+        return;
+      }
+
+      if (firebaseErr?.code === 'auth/too-many-requests') {
+        setErrorMessage('SMS rate limit exceeded or carrier filtering active. Please add your number under "Phone numbers for testing" in Firebase Console to test instantly.');
+        return;
+      }
+
+      setErrorMessage(`Firebase SMS Error (${firebaseErr?.code || 'Notice'}): ${firebaseErr?.message || 'Could not dispatch SMS'}. Please verify Phone provider is Enabled in Firebase Console.`);
     }
   };
 
