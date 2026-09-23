@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile } from '../types';
 import { otpService } from '../utils/otpService';
 import { 
@@ -249,34 +249,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           /* AUTH FORM */
           <div className="space-y-5">
             
-            {/* Real-Time SMS Gateway Dispatched Alert Card */}
-            {activeCodeBanner && otpStep && (
-              <div className="p-4 rounded-2xl bg-[#191924] border border-amber-500/40 shadow-xl space-y-2.5 animate-in slide-in-from-top-2">
+            {/* SMS Delivery Notice to Phone */}
+            {otpStep && (
+              <div className="p-4 rounded-2xl bg-[#151520] border border-amber-500/30 shadow-lg space-y-2 animate-in slide-in-from-top-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs text-amber-300 font-semibold">
-                    <BellRing className="w-4 h-4 text-amber-400 animate-bounce" />
-                    <span>SMS Gateway Dispatched</span>
+                    <BellRing className="w-4 h-4 text-emerald-400 animate-pulse" />
+                    <span>SMS Dispatched to Your Mobile</span>
                   </div>
                   <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/40 font-bold">
-                    ✓ Code Sent
+                    ✓ Sent to Phone
                   </span>
                 </div>
-                <div className="flex items-center justify-between bg-stone-950/90 px-3.5 py-2.5 rounded-xl border border-stone-800">
-                  <span className="font-mono text-xl font-extrabold text-amber-300 tracking-widest">
-                    {activeCodeBanner}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleAutoFill}
-                    className="px-3 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 font-bold text-xs shadow-gold-glow flex items-center gap-1 transition-transform active:scale-95"
-                  >
-                    <span>⚡ Auto-Fill</span>
-                  </button>
-                </div>
-                <p className="text-[10px] text-stone-400 flex items-center justify-between">
-                  <span>Transmitted to +91 {phoneNumber}</span>
-                  <span className="text-amber-400/90 font-mono">Valid: 5 mins</span>
+                <p className="text-xs text-stone-300 leading-relaxed">
+                  A 6-digit verification code has been sent via SMS to <strong className="text-white font-mono">+91 {phoneNumber}</strong>. Please check your mobile phone's SMS inbox and enter the 6 digits below.
                 </p>
+                <div className="flex items-center justify-between text-[11px] text-stone-400 pt-1 border-t border-stone-800">
+                  <span>Check handset messages</span>
+                  <span className="text-amber-400/90 font-mono">Valid for 5 mins</span>
+                </div>
               </div>
             )}
 
