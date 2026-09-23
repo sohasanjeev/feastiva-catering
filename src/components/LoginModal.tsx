@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile } from '../types';
 import { otpService } from '../utils/otpService';
+import { auth } from '../utils/firebase';
+import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
 import { 
   X, 
   Phone, 
@@ -35,6 +37,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [otpStep, setOtpStep] = useState(false);
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [activeCodeBanner, setActiveCodeBanner] = useState<string | null>(null);
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [isUsingFirebase, setIsUsingFirebase] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -64,21 +68,56 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     setIsLoading(true);
     setErrorMessage('');
+    const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber}`;
 
-    // Generate real cryptographic 6-digit OTP
-    const { code } = otpService.generateOtp(phoneNumber);
-    await otpService.sendOtpRealTime(phoneNumber, code);
+    try {
+      // 1. Setup invisible reCAPTCHA for Firebase Phone Auth
+      if (!(window as any).recaptchaVerifier) {
+        (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          size: 'invisible',
+          callback: () => {},
+          'expired-callback': () => {
+            setErrorMessage('reCAPTCHA expired. Please try sending OTP again.');
+          }
+        });
+      }
 
-    setIsLoading(false);
-    setActiveCodeBanner(code);
-    setOtpStep(true);
-    setResendTimer(60);
-    setOtpDigits(['', '', '', '', '', '']);
+      // 2. Request Google Firebase to send real cellular SMS
+      const confirmation = await signInWithPhoneNumber(auth, formattedPhone, (window as any).recaptchaVerifier);
+      setConfirmationResult(confirmation);
+      setIsUsingFirebase(true);
+      setOtpStep(true);
+      setResendTimer(60);
+      setOtpDigits(['', '', '', '', '', '']);
+      setIsLoading(false);
 
-    // Focus first input box
-    setTimeout(() => {
-      inputRefs.current[0]?.focus();
-    }, 100);
+      setTimeout(() => {
+        inputRefs.current[0]?.focus();
+      }, 100);
+
+    } catch (firebaseErr: any) {
+      console.warn('Firebase SMS notice:', firebaseErr);
+      
+      // If Phone Auth is not yet enabled in Firebase Console, guide the user cleanly:
+      if (firebaseErr?.code === 'auth/operation-not-allowed') {
+        setErrorMessage('Phone Authentication is not yet enabled in your Firebase Console. Please go to console.firebase.google.com -> Authentication -> Sign-in method -> Enable "Phone".');
+        setIsLoading(false);
+        return;
+      }
+
+      // Fallback to secure session OTP if reCAPTCHA or domain isn't authorized locally
+      const { code } = otpService.generateOtp(phoneNumber);
+      await otpService.sendOtpRealTime(phoneNumber, code);
+      setIsUsingFirebase(false);
+      setOtpStep(true);
+      setResendTimer(60);
+      setOtpDigits(['', '', '', '', '', '']);
+      setIsLoading(false);
+
+      setTimeout(() => {
+        inputRefs.current[0]?.focus();
+      }, 100);
+    }
   };
 
   const handleResend = async () => {
@@ -144,13 +183,37 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
-  const verifyCode = (codeToVerify: string) => {
+  const verifyCode = async (codeToVerify: string) => {
     setErrorMessage('');
-    const result = otpService.verifyOtp(phoneNumber, codeToVerify);
+    setIsLoading(true);
 
+    if (isUsingFirebase && confirmationResult) {
+      try {
+        const userCredential = await confirmationResult.confirm(codeToVerify);
+        const fbUser = userCredential.user;
+        const newUser: UserProfile = {
+          name: userName || `Customer ${phoneNumber.slice(-4)}`,
+          phone: fbUser.phoneNumber || `+91${phoneNumber}`,
+          email: fbUser.email || `${phoneNumber}@feastivacatering.com`,
+          isLoggedIn: true,
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+        };
+        setIsLoading(false);
+        onLogin(newUser);
+        onClose();
+        return;
+      } catch (err: any) {
+        setIsLoading(false);
+        setErrorMessage('Incorrect 6-digit verification code. Please check your phone SMS messages.');
+        return;
+      }
+    }
+
+    const result = otpService.verifyOtp(phoneNumber, codeToVerify);
+    setIsLoading(false);
     if (result.success) {
       const newUser: UserProfile = {
-        name: userName || `Guest ${phoneNumber.slice(-4)}`,
+        name: userName || `Customer ${phoneNumber.slice(-4)}`,
         phone: phoneNumber,
         email: `${phoneNumber}@feastivacatering.com`,
         isLoggedIn: true,
@@ -345,6 +408,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     </div>
                   </div>
 
+                  <div id="recaptcha-container"></div>
                   <button
                     type="submit"
                     disabled={phoneNumber.length < 10 || isLoading}
